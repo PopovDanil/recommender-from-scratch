@@ -75,8 +75,10 @@ The proposal fixes these rules. Treat them as contract, not implementation detai
   train + validation before test, and do not add validation interactions to the graph.
 - Run every reported configuration with at least three prespecified random seeds and
   report mean and standard deviation. Do not select seeds after seeing test results.
-- Every experiment must use `evaluate_split` from `src/evaluation/metrics.py`. Do not add
-  a second evaluator.
+- Every model and baseline must inherit from the `Recommender` abstract base class in
+  `src/models/base.py` and implement its `score` method.
+- Every experiment must use `evaluate` (also exported as `evaluate_split`) from
+  `src/evaluation/metrics.py`. Do not add a second evaluator.
 
 ## Comments
 
