@@ -5,9 +5,19 @@ description = "From-scratch BPR matrix factorization and LightGCN on MovieLens-1
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.0",
     "pandas>=3.1.0",
     "pyyaml>=6.0.3",
+    "torch>=2.5",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
 
 [dependency-groups]
 dev = [
