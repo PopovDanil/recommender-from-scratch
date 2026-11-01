@@ -220,7 +220,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Project data and run artifacts
-/data/
+/data/*
+!/data/manifest.yaml
 /runs/
 /outputs/
 /checkpoints/

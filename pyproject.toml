@@ -4,12 +4,17 @@ version = "0.1.0"
 description = "From-scratch BPR matrix factorization and LightGCN on MovieLens-1M"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pandas>=3.1.0",
+    "pyyaml>=6.0.3",
+]
 
 [dependency-groups]
 dev = [
     "mypy>=1.14",
+    "pandas-stubs>=3.1.0.261029",
     "ruff>=0.9",
+    "types-pyyaml>=6.0.12.20261030",
 ]
 
 [tool.ruff]
@@ -24,4 +29,4 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
-files = ["src"]
+files = ["src", "scripts"]

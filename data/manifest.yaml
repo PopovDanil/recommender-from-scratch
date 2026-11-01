@@ -1,0 +1,206 @@
+schema_version: 1
+dataset:
+  name: MovieLens-1M
+  source: https://files.grouplens.org/datasets/movielens/ml-1m.zip
+  n_ratings: 1000209
+  n_users: 6040
+  n_movies_rated: 3706
+  n_movies_in_release: 3883
+  rating_counts:
+    '1': 56174
+    '2': 107557
+    '3': 261197
+    '4': 348971
+    '5': 226310
+  timestamp_range:
+    min: '2000-04-25T23:05:32Z'
+    max: '2003-02-28T17:49:50Z'
+  raw_files:
+    ratings.dat: 506d64ca44484487c11dc2d9a28de5c54948213e6b96285e298afe28d6ea4e0f
+    users.dat: 1dc3a95300cb19f7c10e027daf29b8cdf1d908dab65b5edfb45950aa389a10a3
+    movies.dat: 0140fc2356357c1a851d0f52e893a1e4d3696df632c4141cea8d5bc3d621f0b9
+  archive:
+    path: data/ml-1m.zip
+    sha256: a6898adb50b9ca05aa231689da44c217cb524e7ebd39d264c56e2832f2c54e20
+split:
+  strategy: global_timestamp_boundaries
+  timezone: UTC
+  validation_start: '2001-01-01T00:00:00Z'
+  test_start: '2001-07-01T00:00:00Z'
+  validation_start_epoch: 978307200
+  test_start_epoch: 993945600
+  assignment: timestamp < validation_start -> train; validation_start <= timestamp
+    < test_start -> validation; timestamp >= test_start -> test
+  tie_policy: ratings with identical timestamps stay in the same split
+  ratings_at_boundaries:
+    validation_start: 0
+    test_start: 0
+periods:
+  train:
+    n_ratings: 904757
+    n_users: 6034
+    n_movies: 3678
+    n_positive: 523365
+    n_negative: 147096
+    n_neutral: 234296
+  validation:
+    n_ratings: 47314
+    n_users: 926
+    n_movies: 3157
+    n_positive: 26074
+    n_negative: 7884
+    n_neutral: 13356
+  test:
+    n_ratings: 48138
+    n_users: 799
+    n_movies: 3237
+    n_positive: 25842
+    n_negative: 8751
+    n_neutral: 13545
+catalog:
+  definition: movies with at least one positive training interaction
+  n_movies: 3492
+  train_positive_count:
+    min: 1.0
+    mean: 149.8754295532646
+    median: 45.0
+    max: 2749.0
+  path: data/processed/ml-1m/catalog.csv
+  rows: 3492
+  sha256: 76e8002438391008005b6830fffbac97ebe234b302e307ee4a2997f974f23c70
+eligibility:
+  users_total: 6040
+  train_users_with_positive: 6030
+  users_without_train_positive: 10
+  periods:
+    validation:
+      positive_targets_total: 26074
+      positive_targets_outside_catalog: 21
+      positive_targets_from_users_without_train_positive: 104
+      eligible_positive_targets: 25949
+      target_users_in_catalog: 893
+      eligible_users: 890
+      excluded_users_without_train_positive: 3
+      excluded_users_without_eligible_target: 5140
+      positives_per_eligible_user:
+        min: 1.0
+        mean: 29.156179775280897
+        median: 11.0
+        max: 550.0
+    test:
+      positive_targets_total: 25842
+      positive_targets_outside_catalog: 80
+      positive_targets_from_users_without_train_positive: 543
+      eligible_positive_targets: 25222
+      target_users_in_catalog: 780
+      eligible_users: 773
+      excluded_users_without_train_positive: 7
+      excluded_users_without_eligible_target: 5257
+      positives_per_eligible_user:
+        min: 1.0
+        mean: 32.628719275549805
+        median: 18.0
+        max: 454.0
+negative_sampling:
+  explicit_pool: catalog movies rated 1-2 by the user in train
+  unrated_pool: catalog movies with no training rating from the user, including ratings
+    of 3
+  fallback: users without eligible explicit negatives sample from the unrated pool
+    only
+  catalog_movies: 3492
+  train_users_with_positive: 6030
+  explicit_negatives_in_catalog: 146539
+  users_with_explicit_negatives: 5733
+  users_without_explicit_negatives: 297
+  explicit_negative_count_groups:
+    zero: 297
+    one_to_two: 814
+    three_plus: 4919
+  explicit_pool_size:
+    min: 0.0
+    mean: 24.3016583747927
+    median: 9.0
+    max: 632.0
+  unrated_pool_size:
+    min: 1469.0
+    mean: 3342.082089552239
+    median: 3405.0
+    max: 3490.0
+  expected_realized_proportion_if_uniform_over_triplets:
+    '0': 0.0
+    '0.25': 0.24464284008292492
+    '0.5': 0.48928568016584983
+experiments:
+  models:
+  - mf_bpr
+  - lightgcn_bpr
+  target_explicit_negative_proportions:
+  - 0.0
+  - 0.25
+  - 0.5
+  seeds:
+  - 42
+  - 43
+  - 44
+  configurations:
+  - name: mf_bpr_p0
+    model: mf_bpr
+    target_explicit_negative_proportion: 0.0
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: mf_bpr_p25
+    model: mf_bpr
+    target_explicit_negative_proportion: 0.25
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: mf_bpr_p50
+    model: mf_bpr
+    target_explicit_negative_proportion: 0.5
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcn_bpr_p0
+    model: lightgcn_bpr
+    target_explicit_negative_proportion: 0.0
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcn_bpr_p25
+    model: lightgcn_bpr
+    target_explicit_negative_proportion: 0.25
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcn_bpr_p50
+    model: lightgcn_bpr
+    target_explicit_negative_proportion: 0.5
+    seeds:
+    - 42
+    - 43
+    - 44
+artifacts:
+  splits:
+    train:
+      path: data/processed/ml-1m/train.csv
+      rows: 904757
+      sha256: 3799531d49738a63210462f09cff9cf5fb17de78f137782781118a55a82dced1
+    validation:
+      path: data/processed/ml-1m/validation.csv
+      rows: 47314
+      sha256: b22146e04a2f107ae7d85ab14a4b03ae44f82d8c6871f317d87527e0888ebba1
+    test:
+      path: data/processed/ml-1m/test.csv
+      rows: 48138
+      sha256: 97c6d50120b41696b9c66b9decea731c8cf6a899fbd1bf4fe728d7ee98f6fd38
+  catalog:
+    path: data/processed/ml-1m/catalog.csv
+    rows: 3492
+    sha256: 76e8002438391008005b6830fffbac97ebe234b302e307ee4a2997f974f23c70
+generated_by: scripts/prepare_data.py
