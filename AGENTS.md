@@ -1,0 +1,214 @@
+# AGENTS.md
+
+Instructions for AI coding assistants working in this repository. The goal is code that
+looks like it was written by a careful human maintainer, not generated filler.
+
+## Project
+
+From-scratch recommender comparison on MovieLens-1M: a most-popular baseline, BPR matrix
+factorization (MF + BPR) and a LightGCN graph recommender (LightGCN + BPR). The
+controlled experiment varies the share of explicit low-rating negatives in training (0%,
+25%, 50%) and measures full-catalog top-K ranking quality.
+
+Python 3.12, managed with `uv`.
+
+- `src/data/` — MovieLens loading, temporal split, catalog, negative sampling
+- `src/models/` — Popularity, BPR-MF and LightGCN implementations
+- `src/training/` — BPR training loop, checkpointing, reproducible run setup
+- `src/evaluation/` — ranking metrics and the shared evaluator (`evaluate_split`)
+- `scripts/` — non-notebook entry points (data preparation, remote runs, packing results)
+- `notebooks/` — experiment stages; they orchestrate, they do not own shared logic
+- `docs/`, `results/` — reports and generated outputs
+
+Read `README.md` and `docs/proposal.pdf` before changing the protocol, data layout or
+run structure. Do not change protocol constants, metric definitions, split rules or
+candidate sets unless explicitly asked.
+
+## Commands
+
+```bash
+uv sync                          # install dependencies
+uv run ruff check . --fix        # lint and autofix
+uv run ruff format .             # format
+uv run mypy src                  # type check
+```
+
+Always run the relevant checks after editing Python or notebook code. Do not introduce
+new dependencies without need; prefer what is already in `pyproject.toml`.
+
+## Protocol invariants
+
+The proposal fixes these rules. Treat them as contract, not implementation detail:
+
+- Use the fixed MovieLens-1M release. Download from GroupLens; never commit or
+  redistribute the raw data.
+- Labels: ratings 4–5 are positive, 1–2 are explicit negatives, 3 is neutral.
+- Use two global timestamp boundaries for all users: train before the first, validation
+  between them, test after the second. Freeze the boundaries after the coverage audit and
+  before tuning. Ratings with identical timestamps stay in the same partition.
+- The catalog is every movie with at least one positive training interaction. Use the
+  same catalog for every model, baseline and configuration.
+- The unrated negative pool is catalog movies with no training rating from that user,
+  including ratings of 3. Validation and test interactions never affect either negative
+  pool.
+- When a user has no eligible explicit negatives, fall back to unrated-only sampling and
+  report the realized explicit-negative proportion, not just the target.
+- Keep the number of training triplets and optimizer updates comparable across
+  configurations.
+- Evaluate full-catalog Recall@10/20 and NDCG@10/20, averaged equally across eligible
+  users. Use the same users, splits, targets and candidate sets across configurations.
+- Mask all train-rated movies at validation; mask all train- and validation-rated movies
+  at test. Do not update rankings or masks with interactions from the evaluated period.
+- Select hyperparameters and checkpoints on validation NDCG@20. Do not retrain on
+  train + validation before test, and do not add validation interactions to the graph.
+- Run every reported configuration with at least three prespecified random seeds and
+  report mean and standard deviation. Do not select seeds after seeing test results.
+- Every experiment must use `evaluate_split` from `src/evaluation/metrics.py`. Do not add
+  a second evaluator.
+
+## Comments
+
+Write comments only when the code cannot explain itself.
+
+Do not add comments that restate the next line:
+
+```python
+# BAD
+# Sample a negative item.
+negative = sample_negative(user)
+```
+
+Comments must explain *why*, a non-obvious invariant, or a deliberate trade-off:
+
+```python
+# GOOD: users without eligible explicit negatives fall back to the unrated pool,
+# so the realized proportion can be below the target.
+pool = explicit_pool if explicit_pool and rng.random() < p else unrated_pool
+```
+
+```python
+# GOOD: ties share a partition; splitting them would make the boundary depend on
+# row order rather than time.
+train = ratings[ratings["timestamp"] < boundary]
+```
+
+Do not narrate obvious control flow (`# loop over users`, `# return ranking`, `# check
+if file exists`), label every block with banner comments, or leave commented-out code.
+Delete dead code instead of commenting it out.
+
+## No cross-notebook or cross-cell references in code
+
+Code must stand alone. Never write comments or docstrings such as:
+
+- `# notebook 3 does this, so use the identical structure here`
+- `# same as Cell 12 in baseline.ipynb`
+- `# copied from lightgcn.ipynb`
+- `# see the evaluation notebook for the real implementation`
+
+If logic is shared, move it into an importable module under `src/` and call it from both
+places. If a notebook stage must run in a specific order, document that once in
+`README.md`, not in code comments or cell-by-cell instructions.
+
+Notebook markdown may describe the experiment stage, but must not reference cell numbers,
+"notebook 3", or tell the reader to copy code from another notebook.
+
+## Docstrings
+
+A docstring is not required for every function. Use one when it adds information a
+reader cannot get from the name, signature and type hints.
+
+- Required: public modules and non-trivial public functions where the contract, units,
+  tensor shapes, metric definitions or side effects are not obvious. This includes
+  `evaluate_split`, data preparation entry points, the negative sampler and both model
+  forward passes.
+- Allowed: a short module docstring that explains the purpose and any caveat.
+- Not allowed: `"""Load the ratings."""`, `"""Return the ranking."""`, restating parameter
+  types, listing obvious parameters, or boilerplate sections with no content.
+
+For ranking code, state conventions explicitly: `top_k` is inclusive, lower rank is
+better, and metrics average over users rather than interactions. Keep docstrings short
+and factual. No marketing language, no "This function is responsible for...", no
+step-by-step duplication of the body.
+
+## Formatting and spacing
+
+- Follow `ruff format`; do not hand-wrap code into dense one-liners to save lines.
+- Use blank lines between logical blocks inside functions. Long functions with no
+  visual grouping are a smell; split them or add separation, not banner comments.
+- One statement per line. No semicolon-chained statements, no nested one-line
+  `if ...: return ...` pyramids.
+- Standard import grouping (`ruff`/isort): standard library, third-party, local.
+- Use `pathlib` for paths, f-strings for formatting, explicit type hints at module
+  boundaries.
+- Avoid `Any` except at genuinely untyped library boundaries. Avoid bare `except`.
+- Match the surrounding style; do not reformat untouched code unrelated to the task.
+
+## Python and notebooks
+
+- Shared behavior belongs in `src/` or `scripts/`; notebooks call it. Do not duplicate
+  a function in a notebook because it is convenient.
+- Keep notebook cells focused. Do not add "setup", "imports", "helpers" cells that
+  repeat code already present in the repo.
+- Keep the split boundaries, catalog definition and protocol constants in one place.
+  Never hardcode a different boundary or catalog in a second script or notebook.
+- Use deterministic seeds and document them. Random seeds are part of the protocol, not
+  a convenience knob.
+- Log the realized explicit-negative proportion, seed, configuration and split
+  boundaries with every run.
+- Notebook outputs are not source; do not commit generated data, weights, checkpoints,
+  run artifacts or notebook outputs.
+
+## Git workflow
+
+Use Conventional Commits and short-lived branches off `main`.
+
+Branch names mirror the commit type:
+
+```text
+feat/lightgcn-bpr
+fix/negative-sampling-fallback
+experiment/overlap-sweep
+docs/agents-guidelines
+refactor/shared-evaluator
+```
+
+Keep one logical change per commit. Do not mix formatting, refactoring and behavior
+changes in the same commit.
+
+Commit messages:
+
+```text
+<type>(<scope>): <summary>
+
+<optional body: why the change is needed, wrapped at 72 columns>
+```
+
+- Types: `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`, `chore`.
+- Scopes are optional but useful here: `data`, `models`, `training`, `eval`,
+  `notebooks`, `results`, `scripts`, `docs`.
+- Summary: imperative mood, lowercase, no trailing period, at most 72 characters.
+- Body: explain motivation and trade-offs, not a line-by-line restatement of the diff.
+- Breaking changes: add `!` after the type/scope and a `BREAKING CHANGE:` footer.
+- No generated-by or AI-attribution trailers, no emoji, no vague summaries such as
+  "update code" or "fix stuff".
+
+Examples:
+
+```text
+feat(data): add temporal split with frozen timestamp boundaries
+fix(data): fall back to unrated negatives when a user has no dislikes
+feat(models): implement LightGCN layer propagation
+docs(results): report realized explicit-negative proportions
+```
+
+Before committing, inspect `git diff` and stage only the intended files. Do not commit
+generated data, weights, run artifacts or notebook outputs. Do not amend, force-push or
+commit unless explicitly asked.
+
+## Assistant behavior
+
+- Prefer the smallest correct change. Do not add abstractions, wrappers, config flags or
+  defensive checks for scenarios that cannot happen.
+- Do not add comments, docstrings, README sections or tests beyond what the task needs.
+- Do not claim something was run or verified unless it was.
+- Do not commit unless asked.
