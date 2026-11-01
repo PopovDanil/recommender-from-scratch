@@ -13,6 +13,7 @@ dependencies = [
 dev = [
     "mypy>=1.14",
     "pandas-stubs>=3.1.0.261029",
+    "pytest>=8",
     "ruff>=0.9",
     "types-pyyaml>=6.0.12.20261030",
 ]
@@ -30,3 +31,7 @@ python_version = "3.12"
 strict = true
 warn_unused_configs = true
 files = ["src", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
