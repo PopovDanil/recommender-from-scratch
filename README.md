@@ -29,14 +29,27 @@ or the protocol constants; do not edit generated files by hand.
 
 ```bash
 uv run python -m scripts.run_popularity
-for proportion in 0.0 0.25 0.5; do
-  for seed in 42 43 44; do
-    uv run python -m scripts.train_bpr \
-      --explicit-negative-proportion "$proportion" --seed "$seed"
+for model in mf_bpr lightgcn_bpr; do
+  for proportion in 0.0 0.25 0.5; do
+    for seed in 42 43 44; do
+      uv run python -m scripts.train --model "$model" \
+        --explicit-negative-proportion "$proportion" --seed "$seed"
+    done
   done
 done
 ```
 
-Runs write checkpoints and per-epoch metrics under `runs/`, which is ignored by git.
-Checkpoint selection uses validation NDCG@20 only. The realized explicit-negative
-proportion is recorded in each run's `metrics.json` alongside the target.
+Runs write checkpoints, per-epoch metrics and per-user validation/test metrics under
+`runs/`, which is ignored by git. Checkpoint selection uses validation NDCG@20 only.
+The realized explicit-negative proportion is recorded in each run's `metrics.json`
+alongside the target.
+
+## Analysis and reports
+
+```bash
+uv run python -m scripts.analyze_results
+```
+
+This writes `results/stage2/analysis.json` with seed aggregates, paired bootstrap
+intervals and Holm-corrected Wilcoxon tests. See `docs/lightgcn.md` for the graph
+model and `docs/results.md` for the stage-2 comparison.

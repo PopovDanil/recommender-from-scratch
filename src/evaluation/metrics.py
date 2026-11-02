@@ -130,24 +130,12 @@ def _eligible_targets(
     }
 
 
-def evaluate(
+def _evaluate_per_user(
     split: EvaluationSplit,
     model: Recommender,
-    *,
-    period: str = VALIDATION,
-    metrics: Iterable[str] | None = None,
-    exclude_metrics: Iterable[str] = (),
-    extra_metrics: Sequence[Metric] | None = None,
-) -> dict[str, float]:
-    """Evaluate ``model`` on one held-out period and average over eligible users.
-
-    All metrics are enabled by default. Pass ``metrics`` to evaluate a subset,
-    ``exclude_metrics`` to drop names from the selected set, or ``extra_metrics``
-    to register additional metrics. At validation the candidate set masks every
-    movie rated by the user in train; at test it masks every movie rated in train
-    or validation. The ranking always covers the full remaining catalog.
-    """
-    selected_metrics = _resolve_metrics(metrics, exclude_metrics, extra_metrics)
+    period: str,
+    selected_metrics: Sequence[Metric],
+) -> dict[int, dict[str, float]]:
     period_frame = _period_frame(split, period)
     catalog = _catalog_ids(split.catalog)
     catalog_ids = set(catalog)
@@ -159,8 +147,7 @@ def evaluate(
     masked_by_user = _masked_items(_history_frame(split, period))
     targets_by_user = _eligible_targets(period_frame, catalog_ids, train_users)
 
-    totals = {metric.name: 0.0 for metric in selected_metrics}
-    eligible_users = 0
+    per_user: dict[int, dict[str, float]] = {}
 
     for user_id, target_items in targets_by_user.items():
         masked = masked_by_user.get(user_id, set())
@@ -185,14 +172,60 @@ def evaluate(
                 key=lambda pair: (-pair[0], pair[1]),
             )
         ]
-        for metric in selected_metrics:
-            totals[metric.name] += metric.function(ranked, relevant, metric.k)
-        eligible_users += 1
+        per_user[user_id] = {
+            metric.name: metric.function(ranked, relevant, metric.k) for metric in selected_metrics
+        }
 
-    if eligible_users == 0:
+    return per_user
+
+
+def evaluate_per_user(
+    split: EvaluationSplit,
+    model: Recommender,
+    *,
+    period: str = VALIDATION,
+    metrics: Iterable[str] | None = None,
+    exclude_metrics: Iterable[str] = (),
+    extra_metrics: Sequence[Metric] | None = None,
+) -> dict[int, dict[str, float]]:
+    """Return one metric dictionary per eligible user for paired comparisons.
+
+    The ranking, masking and eligibility rules are identical to :func:`evaluate`;
+    only the aggregation differs. Users without an eligible target are omitted.
+    """
+    selected_metrics = _resolve_metrics(metrics, exclude_metrics, extra_metrics)
+    return _evaluate_per_user(split, model, period, selected_metrics)
+
+
+def evaluate(
+    split: EvaluationSplit,
+    model: Recommender,
+    *,
+    period: str = VALIDATION,
+    metrics: Iterable[str] | None = None,
+    exclude_metrics: Iterable[str] = (),
+    extra_metrics: Sequence[Metric] | None = None,
+) -> dict[str, float]:
+    """Evaluate ``model`` on one held-out period and average over eligible users.
+
+    All metrics are enabled by default. Pass ``metrics`` to evaluate a subset,
+    ``exclude_metrics`` to drop names from the selected set, or ``extra_metrics``
+    to register additional metrics. At validation the candidate set masks every
+    movie rated by the user in train; at test it masks every movie rated in train
+    or validation. The ranking always covers the full remaining catalog.
+    """
+    selected_metrics = _resolve_metrics(metrics, exclude_metrics, extra_metrics)
+    per_user = _evaluate_per_user(split, model, period, selected_metrics)
+
+    if not per_user:
         return {metric.name: 0.0 for metric in selected_metrics}
 
-    return {name: total / eligible_users for name, total in totals.items()}
+    totals = {metric.name: 0.0 for metric in selected_metrics}
+    for user_metrics in per_user.values():
+        for name, value in user_metrics.items():
+            totals[name] += value
+
+    return {name: total / len(per_user) for name, total in totals.items()}
 
 
 evaluate_split = evaluate

@@ -8,6 +8,7 @@ import torch
 
 from src.data.negatives import NegativeSampler
 from src.models.bpr_mf import BPRMatrixFactorization
+from src.models.lightgcn import LightGCN
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ EpochCallback = Callable[[EpochReport], bool]
 
 
 def train_bpr(
-    model: BPRMatrixFactorization,
+    model: BPRMatrixFactorization | LightGCN,
     sampler: NegativeSampler,
     config: BPRTrainingConfig,
     *,

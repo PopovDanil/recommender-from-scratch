@@ -8,6 +8,7 @@ from src.evaluation.metrics import (
     EvaluationSplit,
     Metric,
     evaluate,
+    evaluate_per_user,
     ndcg_at_k,
     recall_at_k,
 )
@@ -203,3 +204,16 @@ def test_no_eligible_users_yields_zero_metrics() -> None:
 
     assert set(report) == {metric.name for metric in DEFAULT_METRICS}
     assert all(value == 0.0 for value in report.values())
+
+
+def test_per_user_metrics_average_to_the_shared_report() -> None:
+    model = DictRecommender({1: {5: 2.0, 2: 1.0}, 2: {5: 1.0}})
+    split = _toy_split()
+
+    per_user = evaluate_per_user(split, model)
+    report = evaluate(split, model)
+
+    assert set(per_user) == {1, 2}
+    for metric in DEFAULT_METRICS:
+        values = [user[metric.name] for user in per_user.values()]
+        assert sum(values) / len(values) == pytest.approx(report[metric.name])

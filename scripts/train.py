@@ -1,12 +1,15 @@
-"""Train MF + BPR with the frozen split and negative-sampling protocol.
+"""Train a BPR recommender with the frozen split and negative-sampling protocol.
 
 Run from the repository root:
 
-    uv run python -m scripts.train_bpr --explicit-negative-proportion 0.0 --seed 42
+    uv run python -m scripts.train --model mf_bpr \
+        --explicit-negative-proportion 0.0 --seed 42
+    uv run python -m scripts.train --model lightgcn_bpr \
+        --explicit-negative-proportion 0.0 --seed 42
 
-Checkpoints and metrics are written under ``runs/``. Checkpoint selection uses
-validation NDCG@20 only; test metrics are produced after training from the best
-validation checkpoint.
+Checkpoints, per-epoch metrics and per-user validation/test metrics are written
+under ``runs/``. Checkpoint selection uses validation NDCG@20 only; test metrics
+are produced after training from the best validation checkpoint.
 """
 
 import argparse
@@ -19,8 +22,14 @@ import torch
 from src.data.negatives import NegativeSampler
 from src.data.processed import ProcessedSplits, load_processed_splits
 from src.data.splitting import DEFAULT_BOUNDARIES, POSITIVE, TEST, VALIDATION
-from src.evaluation.metrics import EvaluationSplit, evaluate
+from src.evaluation.metrics import (
+    EvaluationSplit,
+    evaluate,
+    evaluate_per_user,
+)
+from src.experiments import MODELS
 from src.models.bpr_mf import BPRMatrixFactorization
+from src.models.lightgcn import LightGCN, positive_interaction_edges
 from src.training.bpr import BPRTrainingConfig, EpochReport, train_bpr
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,13 +50,46 @@ def _evaluation_split(splits: ProcessedSplits) -> EvaluationSplit:
     )
 
 
-def _save_checkpoint(model: BPRMatrixFactorization, path: Path) -> None:
+def _build_model(
+    name: str,
+    train_users: list[int],
+    splits: ProcessedSplits,
+    config: BPRTrainingConfig,
+    n_layers: int,
+) -> BPRMatrixFactorization | LightGCN:
+    if name == "mf_bpr":
+        return BPRMatrixFactorization(
+            train_users,
+            splits.catalog_ids,
+            embedding_dim=config.embedding_dim,
+        )
+
+    user_edges, item_edges = positive_interaction_edges(splits.train, splits.catalog_ids)
+    return LightGCN(
+        train_users,
+        splits.catalog_ids,
+        user_edges,
+        item_edges,
+        n_layers=n_layers,
+        embedding_dim=config.embedding_dim,
+    )
+
+
+def _save_checkpoint(model: torch.nn.Module, path: Path) -> None:
     state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
     torch.save(state, path)
 
 
+def _per_user_payload(per_user: dict[int, dict[str, float]]) -> dict[str, dict[str, float]]:
+    return {
+        str(user_id): {name: float(value) for name, value in values.items()}
+        for user_id, values in per_user.items()
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", choices=MODELS, default="mf_bpr")
     parser.add_argument(
         "--data-dir",
         type=Path,
@@ -64,6 +106,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=8192)
     parser.add_argument("--embedding-dim", type=int, default=64)
+    parser.add_argument("--n-layers", type=int, default=2, help="LightGCN propagation layers")
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--regularization", type=float, default=1e-5)
     parser.add_argument("--eval-every", type=int, default=1)
@@ -73,7 +116,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="defaults to runs/mf_bpr_p<percent>/seed_<seed>",
+        help="defaults to runs/<model>_p<percent>/seed_<seed>",
     )
     args = parser.parse_args()
 
@@ -85,7 +128,7 @@ def main() -> None:
         raise ValueError("explicit negative proportion must be in [0, 1]")
 
     percent = round(args.explicit_negative_proportion * 100)
-    experiment = f"mf_bpr_p{percent}"
+    experiment = f"{args.model}_p{percent}"
     output_dir = args.output_dir or ROOT / "runs" / experiment / f"seed_{args.seed}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -94,6 +137,9 @@ def main() -> None:
     device = _resolve_device(args.device)
 
     torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
     sampler = NegativeSampler(
         splits.train,
         splits.catalog_ids,
@@ -113,11 +159,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         regularization=args.regularization,
     )
-    model = BPRMatrixFactorization(
-        train_users,
-        splits.catalog_ids,
-        embedding_dim=config.embedding_dim,
-    )
+    model = _build_model(args.model, train_users, splits, config, args.n_layers)
 
     best_epoch = 0
     best_ndcg = float("-inf")
@@ -178,11 +220,13 @@ def main() -> None:
 
     validation_metrics = evaluate(split, model, period=VALIDATION)
     test_metrics = evaluate(split, model, period=TEST)
+    validation_per_user = evaluate_per_user(split, model, period=VALIDATION)
+    test_per_user = evaluate_per_user(split, model, period=TEST)
     realized = sum(report.realized_explicit_proportion for report in history) / len(history)
 
     results: dict[str, Any] = {
         "experiment": experiment,
-        "model": "mf_bpr",
+        "model": args.model,
         "seed": args.seed,
         "target_explicit_negative_proportion": args.explicit_negative_proportion,
         "realized_explicit_negative_proportion": realized,
@@ -191,12 +235,18 @@ def main() -> None:
             "test_start": DEFAULT_BOUNDARIES.test_start.isoformat(),
         },
         "training_config": asdict(config),
+        "model_config": {
+            "embedding_dim": args.embedding_dim,
+            "n_layers": args.n_layers if args.model == "lightgcn_bpr" else None,
+        },
         "device": device,
         "best_epoch": best_epoch,
         "validation_ndcg@20_at_selection": best_ndcg,
         "epochs": [asdict(report) for report in history],
         "validation": validation_metrics,
         "test": test_metrics,
+        "validation_per_user": _per_user_payload(validation_per_user),
+        "test_per_user": _per_user_payload(test_per_user),
     }
     metrics_path = output_dir / "metrics.json"
     metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
