@@ -1,7 +1,7 @@
 """Aggregate stage-2 runs and run the prespecified paired comparisons.
 
 The script reads per-seed ``metrics.json`` files under ``runs/`` and writes
-``results/stage2/analysis.json``. Primary inference uses test NDCG@20, with
+``docs/analysis.json``. Primary inference uses test NDCG@20, with
 seed-averaged user metrics, 10,000 paired bootstrap resamples and a two-sided
 Wilcoxon signed-rank test followed by Holm correction for the four confirmatory
 comparisons. The 25% conditions are reported as sensitivity analyses.
@@ -202,7 +202,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "results" / "stage2" / "analysis.json",
+        default=ROOT / "docs" / "analysis.json",
     )
     args = parser.parse_args()
 

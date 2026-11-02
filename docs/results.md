@@ -7,7 +7,7 @@ temporal split, averaged equally over eligible users. Each configuration uses se
 
 The LightGCN implementation is described in [lightgcn.md](lightgcn.md). Raw runs are
 written under `runs/` (not tracked); the machine-readable aggregation, per-user
-statistics and bootstrap results are in `results/stage2/analysis.json`.
+statistics and bootstrap results are in `analysis.json`.
 
 ## Protocol and training setup
 

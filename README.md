@@ -50,6 +50,6 @@ alongside the target.
 uv run python -m scripts.analyze_results
 ```
 
-This writes `results/stage2/analysis.json` with seed aggregates, paired bootstrap
+This writes `docs/analysis.json` with seed aggregates, paired bootstrap
 intervals and Holm-corrected Wilcoxon tests. See `docs/lightgcn.md` for the graph
 model and `docs/results.md` for the stage-2 comparison.

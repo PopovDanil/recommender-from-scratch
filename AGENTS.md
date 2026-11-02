@@ -18,7 +18,7 @@ Python 3.12, managed with `uv`.
 - `src/evaluation/` — ranking metrics and the shared evaluator (`evaluate_split`)
 - `scripts/` — non-notebook entry points (data preparation, remote runs, packing results)
 - `notebooks/` — experiment stages; they orchestrate, they do not own shared logic
-- `docs/`, `results/` — reports and generated outputs
+- `docs/` — reports and generated outputs
 
 Data artifacts:
 
