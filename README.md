@@ -7,6 +7,7 @@ with a most-popular baseline and three target explicit-negative proportions.
 
 ```bash
 uv sync
+uv run pre-commit install
 ```
 
 ## Data preparation

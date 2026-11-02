@@ -23,6 +23,7 @@ url = "https://pypi.org/simple"
 dev = [
     "mypy>=1.14",
     "pandas-stubs>=3.1.0.261029",
+    "pre-commit>=4.7.0",
     "pytest>=8",
     "ruff>=0.9",
     "types-pyyaml>=6.0.12.20261030",
