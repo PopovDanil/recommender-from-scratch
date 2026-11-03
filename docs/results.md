@@ -1,13 +1,16 @@
 # Stage 2 results: MF + BPR vs LightGCN + BPR
 
-This report covers the six model/negative-proportion configurations and the
-most-popular baseline. All numbers are full-catalog ranking metrics on the frozen
-temporal split, averaged equally over eligible users. Each configuration uses seeds
-42, 43 and 44; tables report mean ± sample standard deviation across seeds.
+This report covers the six proposal configurations, the most-popular baseline and a
+three-configuration LightGCN++ extension. All numbers are full-catalog ranking
+metrics on the frozen temporal split, averaged equally over eligible users. Each
+configuration uses seeds 42, 43 and 44; tables report mean ± sample standard
+deviation across seeds.
 
-The LightGCN implementation is described in [lightgcn.md](lightgcn.md). Raw runs are
-written under `runs/` (not tracked); the machine-readable aggregation, per-user
-statistics and bootstrap results are in `analysis.json`.
+The LightGCN implementation is described in [lightgcn.md](lightgcn.md); LightGCN++
+is implemented in `src/models/lightgcnpp.py`. Raw runs are written under `runs/`
+(not tracked); the machine-readable aggregation, per-user statistics and bootstrap
+results are in `analysis.json`. The LightGCN++ comparisons are exploratory and are
+not part of the prespecified four-test family.
 
 ## Protocol and training setup
 
@@ -22,6 +25,10 @@ statistics and bootstrap results are in `analysis.json`.
   batch size 8,192, at most 100 epochs and early stopping with patience 10.
 - LightGCN uses two propagation layers. The checkpoint with the best validation
   NDCG@20 is selected before the test evaluation.
+- LightGCN++ uses `D^-α A D^-β` normalization with `α=0.6`, `β=-0.1`,
+  unit-normalized embeddings before each propagation step and `γ=0.2` pooling of
+  the input layer against the mean propagated layer. These are the paper's
+  recommended defaults and were not tuned on this dataset.
 
 ## Test metrics
 
@@ -81,6 +88,35 @@ confirmatory family, and the validation ranking for MF is in the opposite direct
 (0.1683 at 25% vs 0.1748 at 0%). The discrepancy between validation and test ordering
 is a reminder that checkpoint and configuration selection is validation-based while
 the test period has a different user/item mix.
+
+## Extension: LightGCN++
+
+LightGCN++ replaces the fixed symmetric graph normalization with tunable degree
+exponents, unit-normalizes embeddings before propagation and pools the input layer
+against the mean propagated layer. With the paper defaults held fixed, test metrics
+are:
+
+| configuration | realized explicit | best epoch | Recall@10 | Recall@20 | NDCG@10 | NDCG@20 | validation NDCG@20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| LightGCN++, 0% | 0.000 | 6.0 | 0.0705 ± 0.0012 | 0.1197 ± 0.0029 | 0.1963 ± 0.0003 | 0.1908 ± 0.0011 | 0.1796 ± 0.0021 |
+| LightGCN++, 25% | 0.2447 ± 0.0001 | 11.3 | 0.0750 ± 0.0039 | 0.1247 ± 0.0059 | 0.1978 ± 0.0011 | 0.1926 ± 0.0011 | 0.1787 ± 0.0015 |
+| LightGCN++, 50% | 0.4893 ± 0.0000 | 27.7 | 0.0771 ± 0.0016 | 0.1314 ± 0.0034 | 0.1964 ± 0.0024 | 0.1936 ± 0.0028 | 0.1757 ± 0.0012 |
+
+Paired user-level differences on test NDCG@20 (same bootstrap and Wilcoxon
+procedure; `p` is unadjusted because these tests are exploratory):
+
+| comparison | mean difference | 95% paired bootstrap CI | Wilcoxon p |
+| --- | ---: | ---: | ---: |
+| LightGCN++ − LightGCN, 0% | −0.0041 | [−0.0086, +0.0002] | 0.219 |
+| LightGCN++ − LightGCN, 25% | −0.0096 | [−0.0157, −0.0038] | 0.0125 |
+| LightGCN++ − LightGCN, 50% | −0.0056 | [−0.0130, +0.0015] | 0.496 |
+| LightGCN++: 50% − 0% | +0.0027 | [−0.0044, +0.0099] | 0.317 |
+
+Under these fixed defaults, LightGCN++ did not improve on vanilla LightGCN. It is
+significantly worse at 25% and statistically indistinguishable at 0% and 50%. This
+does not rule out the architecture: `α`, `β` and `γ` are dataset-dependent and were
+not tuned here. The result mainly shows that the paper's recommended defaults are
+not automatically better under this temporal split and evaluation protocol.
 
 ## Results by user activity
 

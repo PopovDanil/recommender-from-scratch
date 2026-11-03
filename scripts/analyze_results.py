@@ -4,7 +4,8 @@ The script reads per-seed ``metrics.json`` files under ``runs/`` and writes
 ``docs/analysis.json``. Primary inference uses test NDCG@20, with
 seed-averaged user metrics, 10,000 paired bootstrap resamples and a two-sided
 Wilcoxon signed-rank test followed by Holm correction for the four confirmatory
-comparisons. The 25% conditions are reported as sensitivity analyses.
+comparisons. The 25% conditions are sensitivity analyses, and comparisons
+involving the LightGCN++ extension are exploratory.
 """
 
 import argparse
@@ -38,6 +39,13 @@ PRIMARY_COMPARISONS = (
     Comparison("lightgcn_vs_mf_p50", "lightgcn_bpr_p50", "mf_bpr_p50"),
     Comparison("mf_p50_vs_p0", "mf_bpr_p50", "mf_bpr_p0"),
     Comparison("lightgcn_p50_vs_p0", "lightgcn_bpr_p50", "lightgcn_bpr_p0"),
+)
+
+EXPLORATORY_COMPARISONS = (
+    Comparison("lightgcnpp_vs_lightgcn_p0", "lightgcnpp_bpr_p0", "lightgcn_bpr_p0"),
+    Comparison("lightgcnpp_vs_lightgcn_p25", "lightgcnpp_bpr_p25", "lightgcn_bpr_p25"),
+    Comparison("lightgcnpp_vs_lightgcn_p50", "lightgcnpp_bpr_p50", "lightgcn_bpr_p50"),
+    Comparison("lightgcnpp_p50_vs_p0", "lightgcnpp_bpr_p50", "lightgcnpp_bpr_p0"),
 )
 
 
@@ -241,6 +249,18 @@ def main() -> None:
     for name, adjusted_p in adjusted.items():
         comparisons[name]["holm_adjusted_p"] = adjusted_p
 
+    exploratory: dict[str, Any] = {}
+    for comparison in EXPLORATORY_COMPARISONS:
+        left = per_user[comparison.left]
+        right = per_user[comparison.right]
+        exploratory[comparison.name] = {
+            "left": comparison.left,
+            "right": comparison.right,
+            "metric": PRIMARY_METRIC,
+            "bootstrap": _paired_bootstrap(left, right),
+            "wilcoxon": _wilcoxon_signed_rank(left, right),
+        }
+
     popularity_path = args.runs_dir / "popularity" / "metrics.json"
     popularity = (
         json.loads(popularity_path.read_text(encoding="utf-8"))
@@ -259,6 +279,7 @@ def main() -> None:
         "bootstrap": {"resamples": BOOTSTRAP_RESAMPLES, "seed": BOOTSTRAP_SEED},
         "aggregates": aggregates,
         "comparisons": comparisons,
+        "exploratory_comparisons": exploratory,
         "popularity": popularity,
         "test_user_activity_terciles": activity,
     }
@@ -274,6 +295,13 @@ def main() -> None:
             f"CI=[{bootstrap['ci95_lower']:+.4f}, {bootstrap['ci95_upper']:+.4f}] "
             f"wilcoxon_p={result['wilcoxon']['p_value']:.4f} "
             f"holm_p={result['holm_adjusted_p']:.4f}"
+        )
+    for name, result in exploratory.items():
+        bootstrap = result["bootstrap"]
+        print(
+            f"{name}: diff={bootstrap['mean_difference']:+.4f} "
+            f"CI=[{bootstrap['ci95_lower']:+.4f}, {bootstrap['ci95_upper']:+.4f}] "
+            f"wilcoxon_p={result['wilcoxon']['p_value']:.4f}"
         )
     for name, summary in aggregates.items():
         test = summary["test"][PRIMARY_METRIC]

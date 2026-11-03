@@ -1,13 +1,13 @@
 """Experiment grid shared by data preparation and training.
 
-The six configurations are the cartesian product of two models and three target
-explicit-negative proportions. Seeds are fixed before any test result is seen.
+The grid contains the six proposal configurations plus three LightGCN++ extension
+configurations. Seeds are fixed before any test result is seen.
 """
 
 from dataclasses import dataclass
 from typing import Final
 
-MODELS: Final = ("mf_bpr", "lightgcn_bpr")
+MODELS: Final = ("mf_bpr", "lightgcn_bpr", "lightgcnpp_bpr")
 EXPLICIT_NEGATIVE_PROPORTIONS: Final = (0.0, 0.25, 0.5)
 SEEDS: Final = (42, 43, 44)
 

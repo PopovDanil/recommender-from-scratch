@@ -134,6 +134,7 @@ experiments:
   models:
   - mf_bpr
   - lightgcn_bpr
+  - lightgcnpp_bpr
   target_explicit_negative_proportions:
   - 0.0
   - 0.25
@@ -180,6 +181,27 @@ experiments:
     - 44
   - name: lightgcn_bpr_p50
     model: lightgcn_bpr
+    target_explicit_negative_proportion: 0.5
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcnpp_bpr_p0
+    model: lightgcnpp_bpr
+    target_explicit_negative_proportion: 0.0
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcnpp_bpr_p25
+    model: lightgcnpp_bpr
+    target_explicit_negative_proportion: 0.25
+    seeds:
+    - 42
+    - 43
+    - 44
+  - name: lightgcnpp_bpr_p50
+    model: lightgcnpp_bpr
     target_explicit_negative_proportion: 0.5
     seeds:
     - 42

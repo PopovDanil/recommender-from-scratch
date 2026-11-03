@@ -42,13 +42,16 @@ def _normalized_adjacency(
     n_items: int,
     user_positions: IntArray,
     item_positions: IntArray,
+    *,
+    alpha: float = 0.5,
+    beta: float = 0.5,
 ) -> torch.Tensor:
     n_nodes = n_users + n_items
     item_nodes = item_positions + n_users
     rows = np.concatenate([user_positions, item_nodes])
     cols = np.concatenate([item_nodes, user_positions])
     degrees = np.bincount(rows, minlength=n_nodes).astype(np.float64)
-    values = 1.0 / np.sqrt(degrees[rows] * degrees[cols])
+    values = np.power(degrees[rows], -alpha) * np.power(degrees[cols], -beta)
 
     indices = torch.from_numpy(np.vstack([rows, cols]).astype(np.int64))
     weights = torch.from_numpy(values.astype(np.float32))
@@ -69,6 +72,8 @@ class LightGCN(nn.Module, Recommender):
         n_layers: int = 2,
         embedding_dim: int = 64,
         init_std: float = 0.1,
+        alpha: float = 0.5,
+        beta: float = 0.5,
     ) -> None:
         super().__init__()
         if embedding_dim <= 0:
@@ -101,6 +106,8 @@ class LightGCN(nn.Module, Recommender):
             len(self._item_index),
             user_positions,
             item_positions,
+            alpha=alpha,
+            beta=beta,
         )
         self.register_buffer("_adjacency", adjacency, persistent=False)
         self._combined_cache: torch.Tensor | None = None

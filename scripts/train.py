@@ -6,6 +6,8 @@ Run from the repository root:
         --explicit-negative-proportion 0.0 --seed 42
     uv run python -m scripts.train --model lightgcn_bpr \
         --explicit-negative-proportion 0.0 --seed 42
+    uv run python -m scripts.train --model lightgcnpp_bpr \
+        --explicit-negative-proportion 0.0 --seed 42
 
 Checkpoints, per-epoch metrics and per-user validation/test metrics are written
 under ``runs/``. Checkpoint selection uses validation NDCG@20 only; test metrics
@@ -30,6 +32,7 @@ from src.evaluation.metrics import (
 from src.experiments import MODELS
 from src.models.bpr_mf import BPRMatrixFactorization
 from src.models.lightgcn import LightGCN, positive_interaction_edges
+from src.models.lightgcnpp import LightGCNPlusPlus
 from src.training.bpr import BPRTrainingConfig, EpochReport, train_bpr
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +59,9 @@ def _build_model(
     splits: ProcessedSplits,
     config: BPRTrainingConfig,
     n_layers: int,
+    alpha: float,
+    beta: float,
+    gamma: float,
 ) -> BPRMatrixFactorization | LightGCN:
     if name == "mf_bpr":
         return BPRMatrixFactorization(
@@ -65,6 +71,19 @@ def _build_model(
         )
 
     user_edges, item_edges = positive_interaction_edges(splits.train, splits.catalog_ids)
+    if name == "lightgcnpp_bpr":
+        return LightGCNPlusPlus(
+            train_users,
+            splits.catalog_ids,
+            user_edges,
+            item_edges,
+            n_layers=n_layers,
+            embedding_dim=config.embedding_dim,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+        )
+
     return LightGCN(
         train_users,
         splits.catalog_ids,
@@ -107,6 +126,24 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=8192)
     parser.add_argument("--embedding-dim", type=int, default=64)
     parser.add_argument("--n-layers", type=int, default=2, help="LightGCN propagation layers")
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.6,
+        help="LightGCN++ left degree exponent",
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=-0.1,
+        help="LightGCN++ right degree exponent",
+    )
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.2,
+        help="LightGCN++ weight on the input layer",
+    )
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--regularization", type=float, default=1e-5)
     parser.add_argument("--eval-every", type=int, default=1)
@@ -159,7 +196,16 @@ def main() -> None:
         learning_rate=args.learning_rate,
         regularization=args.regularization,
     )
-    model = _build_model(args.model, train_users, splits, config, args.n_layers)
+    model = _build_model(
+        args.model,
+        train_users,
+        splits,
+        config,
+        args.n_layers,
+        args.alpha,
+        args.beta,
+        args.gamma,
+    )
 
     best_epoch = 0
     best_ndcg = float("-inf")
@@ -237,7 +283,10 @@ def main() -> None:
         "training_config": asdict(config),
         "model_config": {
             "embedding_dim": args.embedding_dim,
-            "n_layers": args.n_layers if args.model == "lightgcn_bpr" else None,
+            "n_layers": args.n_layers if args.model.startswith("lightgcn") else None,
+            "alpha": args.alpha if args.model == "lightgcnpp_bpr" else None,
+            "beta": args.beta if args.model == "lightgcnpp_bpr" else None,
+            "gamma": args.gamma if args.model == "lightgcnpp_bpr" else None,
         },
         "device": device,
         "best_epoch": best_epoch,
