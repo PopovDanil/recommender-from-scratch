@@ -145,9 +145,11 @@ having larger, harder target sets.
 - Explicit dislikes are informative at 25%, but pushing to 50% trades away unrated
   coverage. MF degrades at 50%; LightGCN is more robust but still not significantly
   better than its 0% condition.
-- Unrated still does not mean disliked. Future positive interactions can be sampled
-  as unrated negatives, as allowed by the protocol; the test mask removes them from
-  the candidate set but not from training samples.
+- Unrated still does not mean disliked. A film first rated during test can be
+  sampled as an unrated negative during training. The test mask excludes films
+  the user rated before the test period. A film first rated 4–5 during test
+  remains an eligible target if it is in the training catalog, even if it was
+  previously sampled as an unrated negative.
 - The fixed global split leaves 890 validation and 773 test eligible users out of
   6,040. Results describe this population, not all MovieLens users.
 - Differences are small in absolute NDCG@20 even when statistically significant
