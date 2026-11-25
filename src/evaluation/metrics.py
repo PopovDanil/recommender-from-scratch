@@ -8,7 +8,7 @@ user-specific masking.
 """
 
 import math
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import cast
 
@@ -130,12 +130,12 @@ def _eligible_targets(
     }
 
 
-def _evaluate_per_user(
+def iter_rankings(
     split: EvaluationSplit,
     model: Recommender,
     period: str,
-    selected_metrics: Sequence[Metric],
-) -> dict[int, dict[str, float]]:
+) -> Iterator[tuple[int, list[tuple[int, float]], set[int]]]:
+    """Yield eligible users, full ranked (item, score) pairs and relevant items."""
     period_frame = _period_frame(split, period)
     catalog = _catalog_ids(split.catalog)
     catalog_ids = set(catalog)
@@ -147,9 +147,8 @@ def _evaluate_per_user(
     masked_by_user = _masked_items(_history_frame(split, period))
     targets_by_user = _eligible_targets(period_frame, catalog_ids, train_users)
 
-    per_user: dict[int, dict[str, float]] = {}
-
-    for user_id, target_items in targets_by_user.items():
+    for user_id in sorted(targets_by_user):
+        target_items = targets_by_user[user_id]
         masked = masked_by_user.get(user_id, set())
         candidate_ids = [item for item in catalog if item not in masked]
         relevant = target_items & set(candidate_ids)
@@ -165,13 +164,22 @@ def _evaluate_per_user(
         if not all(math.isfinite(float(score)) for score in scores):
             raise ValueError(f"model returned a non-finite score for user {user_id}")
 
-        ranked = [
-            item
-            for _, item in sorted(
-                zip(scores, candidate_ids, strict=True),
-                key=lambda pair: (-pair[0], pair[1]),
-            )
-        ]
+        ranking = sorted(
+            ((item, float(score)) for item, score in zip(candidate_ids, scores, strict=True)),
+            key=lambda pair: (-pair[1], pair[0]),
+        )
+        yield user_id, ranking, relevant
+
+
+def _evaluate_per_user(
+    split: EvaluationSplit,
+    model: Recommender,
+    period: str,
+    selected_metrics: Sequence[Metric],
+) -> dict[int, dict[str, float]]:
+    per_user: dict[int, dict[str, float]] = {}
+    for user_id, ranking, relevant in iter_rankings(split, model, period):
+        ranked = [item for item, _ in ranking]
         per_user[user_id] = {
             metric.name: metric.function(ranked, relevant, metric.k) for metric in selected_metrics
         }

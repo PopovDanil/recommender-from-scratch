@@ -26,34 +26,9 @@ the exact boundaries, period counts, catalog checksum, negative-pool audit and t
 experiment grid. Rerun both scripts after changing the raw data or the protocol
 constants; do not edit generated files by hand.
 
-## Training
+## Training and analysis
 
-```bash
-uv run python -m scripts.run_popularity
-for model in mf_bpr lightgcn_bpr lightgcnpp_bpr; do
-  for proportion in 0.0 0.25 0.5; do
-    for seed in 42 43 44; do
-      uv run python -m scripts.train --model "$model" \
-        --explicit-negative-proportion "$proportion" --seed "$seed"
-    done
-  done
-done
-```
-
-LightGCN++ uses the paper's recommended defaults `--alpha 0.6 --beta -0.1
---gamma 0.2`; override them for validation-based tuning. Runs write checkpoints,
-per-epoch metrics and per-user validation/test metrics under `runs/`, which is
-ignored by git. Checkpoint selection uses validation NDCG@20 only. The realized
-explicit-negative proportion is recorded in each run's `metrics.json` alongside
-the target.
-
-## Analysis and reports
-
-```bash
-uv run python -m scripts.analyze_results
-```
-
-This writes `docs/analysis.json` with seed aggregates, paired bootstrap
-intervals and Holm-corrected Wilcoxon tests for the prespecified comparisons,
-plus exploratory LightGCN++ comparisons. See `docs/lightgcn.md` for the graph
-model and `docs/results.md` for the stage-2 comparison.
+See [the experiment workflow](docs/experiment-workflow.md) for collision-safe
+validation runs, explicit final evaluation, ranking export and popularity analysis.
+The old numbers in `docs/results.md` and `docs/analysis.json` describe legacy runs
+and must not be interpreted as corrected initial-L2 LightGCN results.

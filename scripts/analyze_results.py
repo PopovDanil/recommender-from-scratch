@@ -17,6 +17,7 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+from src.evaluation.paired import exact_users
 from src.experiments import Experiment, experiment_grid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,7 +58,14 @@ def _load_run(runs_dir: Path, experiment: str, seed: int) -> dict[str, Any]:
     path = _run_path(runs_dir, experiment, seed)
     if not path.is_file():
         raise FileNotFoundError(f"missing run metrics: {path}")
-    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    run = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    if run.get("seed") != seed or run.get("experiment") != experiment:
+        raise ValueError(f"{path}: mismatched seed or experiment")
+    if run.get("regularization_on") != "initial":
+        raise ValueError(f"{path}: corrected initial-L2 run required")
+    if "test_per_user" not in run:
+        raise ValueError(f"{path}: explicit test evaluation required")
+    return run
 
 
 def _aggregate(runs_dir: Path, experiment: Experiment) -> dict[str, Any]:
@@ -99,9 +107,19 @@ def _seed_averaged_users(
     metric: str,
 ) -> dict[int, float]:
     samples: dict[int, list[float]] = {}
+    reference: set[int] | None = None
     for seed in experiment.seeds:
         run = _load_run(runs_dir, experiment.name, seed)
         per_user = run[f"{period}_per_user"]
+        current = {int(user_id) for user_id in per_user}
+        if reference is None:
+            reference = current
+        else:
+            exact_users(reference, current, context=f"{experiment.name} seed {seed}")
+        if period == "test" and len(current) != 773:
+            raise ValueError(
+                f"{experiment.name} seed {seed}: expected 773 users, got {len(current)}"
+            )
         for user_id, values in per_user.items():
             samples.setdefault(int(user_id), []).append(float(values[metric]))
 
@@ -118,9 +136,7 @@ def _paired_bootstrap(
     resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> dict[str, float]:
-    users = sorted(set(left) & set(right))
-    if not users:
-        raise ValueError("paired comparison has no common users")
+    users = exact_users(set(left), set(right))
 
     differences = np.array([left[user] - right[user] for user in users], dtype=np.float64)
     rng = np.random.default_rng(seed)
@@ -140,7 +156,7 @@ def _paired_bootstrap(
 
 
 def _wilcoxon_signed_rank(left: dict[int, float], right: dict[int, float]) -> dict[str, float]:
-    users = sorted(set(left) & set(right))
+    users = exact_users(set(left), set(right))
     differences = np.array([left[user] - right[user] for user in users], dtype=np.float64)
     nonzero = differences[differences != 0.0]
     n = nonzero.size
@@ -210,11 +226,15 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "docs" / "analysis.json",
+        default=ROOT / "docs" / "final-analysis.json",
     )
+    parser.add_argument("--include-lightgcnpp", action="store_true")
+    parser.add_argument("--table-output", type=Path, default=ROOT / "docs/final-tables.md")
     args = parser.parse_args()
 
-    experiments = experiment_grid()
+    experiments = tuple(
+        e for e in experiment_grid() if args.include_lightgcnpp or e.model != "lightgcnpp_bpr"
+    )
     aggregates = {
         experiment.name: _aggregate(args.runs_dir, experiment) for experiment in experiments
     }
@@ -228,6 +248,10 @@ def main() -> None:
         )
         for experiment in experiments
     }
+
+    reference = set(next(iter(per_user.values())))
+    for name, values in per_user.items():
+        exact_users(reference, set(values), context=name)
 
     comparisons: dict[str, Any] = {}
     raw_p_values: dict[str, float] = {}
@@ -250,7 +274,7 @@ def main() -> None:
         comparisons[name]["holm_adjusted_p"] = adjusted_p
 
     exploratory: dict[str, Any] = {}
-    for comparison in EXPLORATORY_COMPARISONS:
+    for comparison in EXPLORATORY_COMPARISONS if args.include_lightgcnpp else ():
         left = per_user[comparison.left]
         right = per_user[comparison.right]
         exploratory[comparison.name] = {
@@ -268,6 +292,21 @@ def main() -> None:
         else None
     )
 
+    if popularity is None or "test_per_user" not in popularity:
+        raise ValueError("Regenerate Most Popular metrics with per-user results")
+    exact_users(reference, {int(u) for u in popularity["test_per_user"]}, context="Most Popular")
+    for name, summary in aggregates.items():
+        summary["gain_over_popularity"] = {
+            metric: summary["test"][metric]["mean"] - popularity["test"][metric]
+            for metric in METRICS
+        }
+        summary["scope"] = (
+            "exploratory"
+            if name.startswith("lightgcnpp")
+            else "sensitivity"
+            if name.endswith("p25")
+            else "primary"
+        )
     train = pd.read_csv(args.data_dir / "train.csv")
     activity = {
         experiment.name: _user_activity_groups(train, per_user[experiment.name])
@@ -287,6 +326,38 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 
+    table = [
+        "# Generated test results",
+        "",
+        "Mean ± sample SD across seeds; gains are absolute.",
+        "",
+        "| Configuration | Scope | Recall@10 | Recall@20 | NDCG@10 | NDCG@20 | Gain NDCG@20 |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    baseline = " | ".join(f"{popularity['test'][m]:.4f}" for m in METRICS)
+    table.append(f"| Most Popular | baseline | {baseline} | 0 |")
+    for name, summary in aggregates.items():
+        cells = " | ".join(
+            f"{summary['test'][m]['mean']:.4f} ± {summary['test'][m]['std']:.4f}" for m in METRICS
+        )
+        gain = summary["gain_over_popularity"][PRIMARY_METRIC]
+        table.append(f"| {name} | {summary['scope']} | {cells} | {gain:+.4f} |")
+    table.extend(
+        [
+            "",
+            "| Primary comparison | Difference | 95% CI | Raw p | Holm p |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    for name, result in comparisons.items():
+        b = result["bootstrap"]
+        table.append(
+            f"| {name} | {b['mean_difference']:+.4f} | "
+            f"[{b['ci95_lower']:+.4f}, {b['ci95_upper']:+.4f}] | "
+            f"{result['wilcoxon']['p_value']:.4g} | {result['holm_adjusted_p']:.4g} |"
+        )
+    args.table_output.parent.mkdir(parents=True, exist_ok=True)
+    args.table_output.write_text("\n".join(table) + "\n", encoding="utf-8")
     print(f"wrote {args.output}")
     for name, result in comparisons.items():
         bootstrap = result["bootstrap"]
