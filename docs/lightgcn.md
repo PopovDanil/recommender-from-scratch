@@ -43,7 +43,11 @@ LightGCN is trained with the same BPR pairwise loss and negative sampler as MF +
 L = -mean(log sigmoid(x_ui - x_uj)) + lambda * mean(||e_u||^2 + ||e_i||^2 + ||e_j||^2)
 ```
 
-The regularization term uses the propagated triplets, matching the MF-BPR form. The
+The regularization term uses the initial trainable triplet embeddings by default,
+with exactly the same per-triplet mean and coefficient as MF. BPR scores still
+use the propagated embeddings. LightGCN++ follows the same default. The old
+propagated-L2 variant is retained via `--regularization-on propagated` as a legacy
+ablation, not a controlled estimate of the graph effect. The
 negative sampler, number of triplets, batch size, optimizer, learning rate and early
 stopping rule are shared with the MF runs, keeping the training budget comparable.
 The training loop is model-agnostic in `src/training/bpr.py`.
@@ -55,10 +59,9 @@ uv run python -m scripts.train --model lightgcn_bpr \
   --explicit-negative-proportion 0.0 --seed 42
 ```
 
-Each run writes `best.pt` and `metrics.json` under
-`runs/lightgcn_bpr_p<percent>/seed_<seed>/`. Checkpoint selection uses validation
-NDCG@20 only. The script also stores per-user validation and test metrics for the
-paired statistical analysis in `scripts/analyze_results.py`.
+Each run writes `best.pt` and `metrics.json` in a unique run directory.
+Checkpoint selection uses validation NDCG@20 only. Test metrics are written only
+by an explicit `scripts.evaluate_checkpoint --run-dir PATH` invocation.
 
 ## Avoided information leaks
 

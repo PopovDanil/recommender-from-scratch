@@ -74,6 +74,7 @@ class LightGCN(nn.Module, Recommender):
         init_std: float = 0.1,
         alpha: float = 0.5,
         beta: float = 0.5,
+        regularization_on: str = "initial",
     ) -> None:
         super().__init__()
         if embedding_dim <= 0:
@@ -88,6 +89,9 @@ class LightGCN(nn.Module, Recommender):
         self._user_index = {int(user): index for index, user in enumerate(user_ids)}
         self._item_index = {int(item): index for index, item in enumerate(item_ids)}
         self.n_layers = n_layers
+        if regularization_on not in ("initial", "propagated"):
+            raise ValueError("regularization_on must be initial or propagated")
+        self.regularization_on = regularization_on
 
         user_positions = np.array(
             [self._user_index[int(user)] for user in user_edges],
@@ -155,6 +159,10 @@ class LightGCN(nn.Module, Recommender):
         loss = -torch.nn.functional.logsigmoid(positive_scores - negative_scores).mean()
 
         if regularization > 0.0:
+            if self.regularization_on == "initial":
+                users = self.embedding(user_indices)
+                positives = self.embedding(positive_indices)
+                negatives = self.embedding(negative_indices)
             norms = (
                 users.pow(2).sum(dim=1) + positives.pow(2).sum(dim=1) + negatives.pow(2).sum(dim=1)
             )

@@ -11,11 +11,10 @@ Run from the repository root:
 
 Checkpoints, per-epoch metrics and per-user validation/test metrics are written
 under ``runs/``. Checkpoint selection uses validation NDCG@20 only; test metrics
-are produced after training from the best validation checkpoint.
+require an explicit scripts.evaluate_checkpoint invocation.
 """
 
 import argparse
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,7 @@ from typing import Any
 import torch
 from src.data.negatives import NegativeSampler
 from src.data.processed import ProcessedSplits, load_processed_splits
-from src.data.splitting import DEFAULT_BOUNDARIES, POSITIVE, TEST, VALIDATION
+from src.data.splitting import DEFAULT_BOUNDARIES, POSITIVE, VALIDATION
 from src.evaluation.metrics import (
     EvaluationSplit,
     evaluate,
@@ -33,6 +32,14 @@ from src.experiments import MODELS
 from src.models.bpr_mf import BPRMatrixFactorization
 from src.models.lightgcn import LightGCN, positive_interaction_edges
 from src.models.lightgcnpp import LightGCNPlusPlus
+from src.training.artifacts import (
+    data_fingerprint,
+    git_commit,
+    reserve_run,
+    run_id,
+    sha256,
+    write_json,
+)
 from src.training.bpr import BPRTrainingConfig, EpochReport, train_bpr
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +69,7 @@ def _build_model(
     alpha: float,
     beta: float,
     gamma: float,
+    regularization_on: str = "initial",
 ) -> BPRMatrixFactorization | LightGCN:
     if name == "mf_bpr":
         return BPRMatrixFactorization(
@@ -82,6 +90,7 @@ def _build_model(
             alpha=alpha,
             beta=beta,
             gamma=gamma,
+            regularization_on=regularization_on,
         )
 
     return LightGCN(
@@ -91,6 +100,7 @@ def _build_model(
         item_edges,
         n_layers=n_layers,
         embedding_dim=config.embedding_dim,
+        regularization_on=regularization_on,
     )
 
 
@@ -144,6 +154,8 @@ def main() -> None:
         default=0.2,
         help="LightGCN++ weight on the input layer",
     )
+    parser.add_argument("--regularization-on", choices=("initial", "propagated"), default="initial")
+    parser.add_argument("--manifest", type=Path, default=ROOT / "data/manifest.yaml")
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--regularization", type=float, default=1e-5)
     parser.add_argument("--eval-every", type=int, default=1)
@@ -153,7 +165,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="defaults to runs/<model>_p<percent>/seed_<seed>",
+        help="defaults to a configuration-hashed directory under runs/",
     )
     args = parser.parse_args()
 
@@ -166,12 +178,34 @@ def main() -> None:
 
     percent = round(args.explicit_negative_proportion * 100)
     experiment = f"{args.model}_p{percent}"
-    output_dir = args.output_dir or ROOT / "runs" / experiment / f"seed_{args.seed}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    if args.model == "mf_bpr" and args.regularization_on != "initial":
+        raise ValueError("MF supports initial-embedding regularization only")
+    if args.regularization_on == "propagated":
+        experiment = f"{args.model}_legacy_p{percent}"
+    if patience <= 0:
+        raise ValueError("patience must be positive")
     splits = load_processed_splits(args.data_dir)
     split = _evaluation_split(splits)
     device = _resolve_device(args.device)
+    cli = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+        if key != "output_dir"
+    }
+    fingerprint = data_fingerprint(args.data_dir)
+    manifest_sha = sha256(args.manifest)
+    commit = git_commit(ROOT)
+    identity = run_id(
+        {
+            "cli": cli,
+            "device": device,
+            "data": fingerprint,
+            "manifest": manifest_sha,
+            "commit": commit,
+        }
+    )
+    output_dir = args.output_dir or ROOT / "runs" / experiment / f"seed_{args.seed}_{identity}"
+    reserve_run(output_dir)
 
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -205,11 +239,13 @@ def main() -> None:
         args.alpha,
         args.beta,
         args.gamma,
+        args.regularization_on,
     )
 
     best_epoch = 0
     best_ndcg = float("-inf")
     stale_evaluations = 0
+    validation_history: list[dict[str, float]] = []
     checkpoint_path = output_dir / "best.pt"
 
     def on_epoch_end(report: EpochReport) -> bool:
@@ -232,6 +268,7 @@ def main() -> None:
             metrics=["ndcg@20"],
         )
         value = validation["ndcg@20"]
+        validation_history.append({"epoch": report.epoch, "ndcg@20": value})
         improved = value > best_ndcg
         if improved:
             best_ndcg = value
@@ -265,9 +302,7 @@ def main() -> None:
     model.eval()
 
     validation_metrics = evaluate(split, model, period=VALIDATION)
-    test_metrics = evaluate(split, model, period=TEST)
     validation_per_user = evaluate_per_user(split, model, period=VALIDATION)
-    test_per_user = evaluate_per_user(split, model, period=TEST)
     realized = sum(report.realized_explicit_proportion for report in history) / len(history)
 
     results: dict[str, Any] = {
@@ -289,23 +324,28 @@ def main() -> None:
             "gamma": args.gamma if args.model == "lightgcnpp_bpr" else None,
         },
         "device": device,
+        "cli": cli,
+        "run_id": identity,
+        "git_commit": commit,
+        "manifest_sha256": manifest_sha,
+        "data_sha256": fingerprint,
+        "checkpoint_sha256": sha256(checkpoint_path),
+        "regularization_on": args.regularization_on,
+        "validation_history": validation_history,
         "best_epoch": best_epoch,
         "validation_ndcg@20_at_selection": best_ndcg,
         "epochs": [asdict(report) for report in history],
         "validation": validation_metrics,
-        "test": test_metrics,
         "validation_per_user": _per_user_payload(validation_per_user),
-        "test_per_user": _per_user_payload(test_per_user),
     }
     metrics_path = output_dir / "metrics.json"
-    metrics_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    write_json(metrics_path, results)
 
     print(f"wrote {checkpoint_path}")
     print(f"wrote {metrics_path}")
     print(
         f"seed={args.seed} realized_explicit={realized:.3f} "
-        f"val_ndcg@20={validation_metrics['ndcg@20']:.6f} "
-        f"test_ndcg@20={test_metrics['ndcg@20']:.6f}"
+        f"val_ndcg@20={validation_metrics['ndcg@20']:.6f}"
     )
 
 

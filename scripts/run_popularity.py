@@ -7,7 +7,7 @@ from typing import Any
 
 from src.data.processed import load_processed_splits
 from src.data.splitting import DEFAULT_BOUNDARIES, TEST, VALIDATION
-from src.evaluation.metrics import EvaluationSplit, evaluate
+from src.evaluation.metrics import EvaluationSplit, evaluate, evaluate_per_user
 from src.models.popularity import Popularity
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +47,7 @@ def main() -> None:
         },
         "validation": evaluate(split, model, period=VALIDATION),
         "test": evaluate(split, model, period=TEST),
+        "test_per_user": evaluate_per_user(split, model, period=TEST),
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -29,6 +29,7 @@ class LightGCNPlusPlus(LightGCN):
         alpha: float = 0.6,
         beta: float = -0.1,
         gamma: float = 0.2,
+        regularization_on: str = "initial",
     ) -> None:
         if not 0.0 <= gamma <= 1.0:
             raise ValueError("gamma must be in [0, 1]")
@@ -45,6 +46,7 @@ class LightGCNPlusPlus(LightGCN):
             init_std=init_std,
             alpha=alpha,
             beta=beta,
+            regularization_on=regularization_on,
         )
 
     def _propagate(self) -> torch.Tensor:
